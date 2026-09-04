@@ -1,0 +1,87 @@
+{
+  "schema": "system-comparator.fact-ledger/v0.1",
+  "audit_id": "system-comparator-audit/2026-09-04",
+  "mode": {
+    "inspection": "read-only",
+    "writes": "isolated audit artifacts only",
+    "forbidden_actions": [
+      "merge",
+      "release",
+      "deployment",
+      "user-file mutation",
+      "cloud synchronization"
+    ]
+  },
+  "public_reference": {
+    "repository": "timelabs-npo/repo404",
+    "pull_request": 1,
+    "branch": "incubator/gccmp-alpha-nightly",
+    "source_commit": "2b0e663a330720245c596729062b8ba926b09771",
+    "workflow_run": 33882726071,
+    "workflow_result": "success",
+    "native_targets": [
+      "windows-x64",
+      "macos-arm64",
+      "macos-x64"
+    ],
+    "canonical_hashes": {
+      "snapshot-a.json": "fa170867104274a534232642ff698606117f69e26928d204393352ca76d73e0f",
+      "snapshot-b.json": "296b7de5ccd8f47a39eb02bc04f8fe3b17045f202f91565d98afc1aeba03bad9",
+      "comparison.json": "401458a7cb648c6b2383009276f5a64f3915fd8279d45a8e52970b1d163f0f01"
+    },
+    "status": "externally-reproducible-limited-alpha"
+  },
+  "advanced_build_evidence": {
+    "version": "0.1.0-alpha.1",
+    "tested_commit": "f3dbf465b5e9bf8d0071a8ff9a510bc0942ec5d2",
+    "tested_tree": "405500066bc737b1e98ba24b8aaad97d91f08c47",
+    "protocol": "rhea.comparator/0.1",
+    "reported_verified": [
+      "go-race-tests",
+      "go-vet",
+      "two-node-demo",
+      "cas-and-ref-invariants",
+      "peer-pull",
+      "explicit-merge",
+      "linux-x64-execution",
+      "cross-builds"
+    ],
+    "external_source_discovery": "no-accessible-match-via-connected-github-or-google-drive",
+    "status": "strong-build-evidence-missing-external-source-provenance"
+  },
+  "legacy_drive_evidence": {
+    "file_id": "1WvB9bDeBVH_ip1YLwY7xmjlUQZO0fGY-",
+    "date": "2026-02-26",
+    "parent_chain": [
+      "projects",
+      "rh.1",
+      "logs"
+    ],
+    "observed": "Python/Uvicorn daemon startup, three GET 200 responses, clean shutdown",
+    "lineage_to_go_rhead": "UNPROVEN"
+  },
+  "redmode_verdicts": {
+    "github_is_complete_system_of_record": "false",
+    "advanced_implementation_automatically_supersedes_public_alpha": "unproven",
+    "old_python_rhead_is_ancestor_of_go_rhead": "unproven",
+    "best_current_model": "advanced local implementation existed but lost its external publish/provenance edge"
+  },
+  "next_gates": [
+    "recover exact advanced source or record provenance break",
+    "executable GCCmp-to-rhea.comparator conformance mapping",
+    "native advanced execution on macOS and Windows",
+    "transactional crash-recovery proof",
+    "stable observation protocol for changing sources",
+    "encryption identity revocation safe-GC and authorization proof",
+    "read-only provider inventory conformance"
+  ],
+  "commercial_wedge": "evidence-preserving workspace continuity for AI R&D teams",
+  "drive_artifact_folders": {
+    "codex": "1bKUlPt-aDcmJ-4_sbh2Y0lHHo4LRxRlb",
+    "antigravity": "1FKAhlp6uSW8iOm7T9jvUJxxi2XPBiy_5"
+  },
+  "audit_archive": {
+    "filename": "system-comparator-audit-2026-09-04.zip",
+    "sha256": "b0ab760b54bb9fa000dd05c5e0b2a5da3af6e2dea7838c2dbf72286e0a2c7f65"
+  }
+}
