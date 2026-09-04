@@ -44,7 +44,7 @@ func SnapshotDirectory(root, label, excludePath string) (SnapshotEnvelope, error
 		Label:                label,
 		ChunkSize:            DefaultChunkSize,
 		Entries:              make([]Entry, 0),
-		Causality:            "unavailable:snapshot-has-no-parent-operation-log",
+		Causality:            snapshotCausalityV01,
 		PortabilityIssues:    make([]PortabilityIssue, 0),
 		PortabilityConflicts: make([]PortabilityConflict, 0),
 	}
