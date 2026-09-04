@@ -1,0 +1,157 @@
+name: gccmp-alpha-ci
+
+on:
+  push:
+    paths:
+      - 'gccmp-alpha/**'
+      - '.github/workflows/gccmp-alpha-*.yml'
+  pull_request:
+    paths:
+      - 'gccmp-alpha/**'
+      - '.github/workflows/gccmp-alpha-*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GCCMP_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
+jobs:
+  native:
+    name: native-${{ matrix.id }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: windows-x64
+            os: windows-2025
+            binary: gccmp.exe
+          - id: macos-arm64
+            os: macos-26
+            binary: gccmp
+          - id: macos-x64
+            os: macos-26-intel
+            binary: gccmp
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: gccmp-alpha
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.1'
+          cache-dependency-path: gccmp-alpha/go.mod
+      - name: Toolchain receipt
+        shell: bash
+        run: |
+          go version
+          go env GOOS GOARCH
+          printf 'source_commit=%s\nworkflow_commit=%s\n' "$GCCMP_SOURCE_SHA" "$GITHUB_SHA"
+      - name: Unit tests
+        shell: bash
+        run: go test -count=1 ./...
+      - name: Build native binary
+        shell: bash
+        run: |
+          mkdir -p dist/evidence
+          go build -trimpath -ldflags "-s -w -X main.version=${GCCMP_SOURCE_SHA}" -o "dist/${{ matrix.binary }}" ./cmd/gccmp
+      - name: Generate frozen evidence
+        shell: bash
+        run: |
+          "dist/${{ matrix.binary }}" snapshot --label fixture-a --out dist/evidence/snapshot-a.json testdata/fixture-a
+          "dist/${{ matrix.binary }}" snapshot --label fixture-b --out dist/evidence/snapshot-b.json testdata/fixture-b
+          "dist/${{ matrix.binary }}" compare --out dist/evidence/comparison.json dist/evidence/snapshot-a.json dist/evidence/snapshot-b.json
+          "dist/${{ matrix.binary }}" verify dist/evidence/snapshot-a.json
+          mkdir -p out
+          cp dist/evidence/*.json out/
+          python3 scripts/check_golden.py
+      - name: Build receipt and hashes
+        shell: bash
+        env:
+          TARGET_ID: ${{ matrix.id }}
+          BINARY_NAME: ${{ matrix.binary }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          dist = pathlib.Path('dist')
+          receipt = {
+              'schema': 'gccmp.build-receipt/v0.1',
+              'canonical': False,
+              'target_id': os.environ['TARGET_ID'],
+              'binary': os.environ['BINARY_NAME'],
+              'source_commit': os.environ['GCCMP_SOURCE_SHA'],
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'source_ref': os.environ.get('GITHUB_HEAD_REF') or os.environ.get('GITHUB_REF_NAME'),
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'runner_os': os.environ['RUNNER_OS'],
+              'runner_arch': os.environ['RUNNER_ARCH'],
+              'go_version': subprocess.check_output(['go', 'version'], text=True).strip(),
+              'tests': 'pass',
+              'golden_receipts': 'matched-local-golden',
+          }
+          (dist / 'BUILD-RECEIPT.json').write_text(
+              json.dumps(receipt, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8', newline='\n'
+          )
+          files = sorted(p for p in dist.rglob('*') if p.is_file() and p.name != 'SHA256SUMS')
+          sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(dist).as_posix()}" for p in files]
+          (dist / 'SHA256SUMS').write_text('\n'.join(sums) + '\n', encoding='utf-8', newline='\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gccmp-alpha-${{ matrix.id }}
+          path: gccmp-alpha/dist/
+          retention-days: 14
+          if-no-files-found: error
+
+  converge:
+    name: cross-os-canonical-convergence
+    needs: native
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gccmp-alpha-*
+          path: artifacts
+      - name: Compare canonical receipts across all native runners
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path('artifacts')
+          names = ('snapshot-a.json', 'snapshot-b.json', 'comparison.json')
+          receipt = {
+              'schema': 'gccmp.convergence-receipt/v0.1',
+              'canonical': False,
+              'source_commit': os.environ['GCCMP_SOURCE_SHA'],
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'artifacts': {},
+              'result': 'pass',
+          }
+          for name in names:
+              found = sorted(root.glob(f'*/evidence/{name}'))
+              if len(found) != 3:
+                  raise SystemExit(f'expected 3 {name} files, found {len(found)}')
+              blobs = [p.read_bytes() for p in found]
+              if any(b != blobs[0] for b in blobs[1:]):
+                  raise SystemExit(f'cross-OS mismatch for {name}: {[str(p) for p in found]}')
+              golden = pathlib.Path('gccmp-alpha/testdata/golden') / name
+              if blobs[0] != golden.read_bytes():
+                  raise SystemExit(f'{name} differs from committed golden file')
+              digest = hashlib.sha256(blobs[0]).hexdigest()
+              receipt['artifacts'][name] = {'sha256': digest, 'copies': [str(p) for p in found]}
+              print(f'CONVERGED {name} sha256={digest}')
+          out = pathlib.Path('convergence')
+          out.mkdir()
+          (out / 'CONVERGENCE-RECEIPT.json').write_text(
+              json.dumps(receipt, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8'
+          )
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gccmp-alpha-convergence
+          path: convergence/
+          retention-days: 30
