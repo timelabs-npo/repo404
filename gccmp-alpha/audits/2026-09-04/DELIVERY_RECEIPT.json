@@ -1,0 +1,51 @@
+{
+  "schema": "system-comparator.delivery-receipt/v0.1",
+  "audit_id": "system-comparator-audit/2026-09-04",
+  "git": {
+    "repository": "timelabs-npo/repo404",
+    "base_branch": "incubator/gccmp-alpha-nightly",
+    "audit_branch": "audit/system-comparator-2026-09-04",
+    "initial_audit_commit": "bbeedc50e9c831c46c3734297ac0ee692459f65c",
+    "draft_pull_request": 2,
+    "merged": false,
+    "production_mutation": false
+  },
+  "archive": {
+    "filename": "system-comparator-audit-2026-09-04.zip",
+    "bytes": 17237,
+    "sha256": "b0ab760b54bb9fa000dd05c5e0b2a5da3af6e2dea7838c2dbf72286e0a2c7f65",
+    "zip_integrity": "PASS"
+  },
+  "google_drive": {
+    "codex": {
+      "folder_id": "1bKUlPt-aDcmJ-4_sbh2Y0lHHo4LRxRlb",
+      "report": "1y-o7SJEq9h5aAuIZiHYawql8TPH2Qga5",
+      "fact_ledger": "1nw_G0YQwHKU_r4GHQuuvGr1ZEQwZn6Ft",
+      "live_check_receipt": "1KrFlweaZKklPiXdekEirpHyiBUoF1jUC",
+      "commercialization_brief": "1spaaH7zhxatJfZupFZ2mOPtSdO1pLkQN",
+      "continuation_handoff": "1Y6V77BK4TS7OKtnzl3VHq9IQA_aPUwmk",
+      "sha256sums": "1QU5JtQgAM0AndXL_tzJ3pYcYK-6rj2S9",
+      "archive": "1VfEN3_uvfmKEClEpCQhBPtlG84oc980v",
+      "delivery_receipt": "135pDZnrdRhkygsJn0X5E4_WSDvpNXeQR"
+    },
+    "antigravity": {
+      "folder_id": "1FKAhlp6uSW8iOm7T9jvUJxxi2XPBiy_5",
+      "report": "1o-sNQEROB_Q__MxxYP7cL29PSCTSKSI2",
+      "fact_ledger": "1OpUf8zRojHPLFA0V7zZNzojPa79rGigq",
+      "live_check_receipt": "11fPzOQU82czO_eIpxKHlHZwXVTerZk9x",
+      "commercialization_brief": "1Yu7BjlhXyPu-ByJyuzgHSv2I_ZxP_YqG",
+      "continuation_handoff": "1QPf-b6I0yipqpFkeZk82WY9wHOc57cKj",
+      "sha256sums": "1MFaLfGK5odpiZoXwIWCeUOaSXaq3V_m2",
+      "archive": "1YoFiD9hJEYcSSKtimq5ivubIaNeiMP1z",
+      "delivery_receipt": "1HCpc_y_wlDQF13zEcvu3d-gv-GuSvAMe"
+    }
+  },
+  "readback_verification": {
+    "codex_archive_bytes": 17237,
+    "antigravity_archive_bytes": 17237,
+    "downloaded_archive_sha256": "b0ab760b54bb9fa000dd05c5e0b2a5da3af6e2dea7838c2dbf72286e0a2c7f65",
+    "expected_archive_sha256": "b0ab760b54bb9fa000dd05c5e0b2a5da3af6e2dea7838c2dbf72286e0a2c7f65",
+    "result": "PASS"
+  },
+  "scope_ceiling": "Evidence publication only. Existing comparator code, storage content, production systems, releases and merges were not modified."
+}
