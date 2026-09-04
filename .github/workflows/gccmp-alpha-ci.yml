@@ -14,6 +14,9 @@ on:
 permissions:
   contents: read
 
+env:
+  GCCMP_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   native:
     name: native-${{ matrix.id }}
@@ -45,6 +48,7 @@ jobs:
         run: |
           go version
           go env GOOS GOARCH
+          printf 'source_commit=%s\nworkflow_commit=%s\n' "$GCCMP_SOURCE_SHA" "$GITHUB_SHA"
       - name: Unit tests
         shell: bash
         run: go test -count=1 ./...
@@ -52,7 +56,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/evidence
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "dist/${{ matrix.binary }}" ./cmd/gccmp
+          go build -trimpath -ldflags "-s -w -X main.version=${GCCMP_SOURCE_SHA}" -o "dist/${{ matrix.binary }}" ./cmd/gccmp
       - name: Generate frozen evidence
         shell: bash
         run: |
@@ -72,24 +76,28 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, pathlib, subprocess
           dist = pathlib.Path('dist')
-          files = sorted(p for p in dist.rglob('*') if p.is_file())
-          sums = []
-          for p in files:
-              sums.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(dist).as_posix()}")
-          (dist / 'SHA256SUMS').write_text('\n'.join(sums) + '\n', encoding='utf-8', newline='\n')
           receipt = {
               'schema': 'gccmp.build-receipt/v0.1',
               'canonical': False,
               'target_id': os.environ['TARGET_ID'],
               'binary': os.environ['BINARY_NAME'],
-              'commit': os.environ['GITHUB_SHA'],
+              'source_commit': os.environ['GCCMP_SOURCE_SHA'],
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'source_ref': os.environ.get('GITHUB_HEAD_REF') or os.environ.get('GITHUB_REF_NAME'),
+              'run_id': os.environ['GITHUB_RUN_ID'],
               'runner_os': os.environ['RUNNER_OS'],
               'runner_arch': os.environ['RUNNER_ARCH'],
               'go_version': subprocess.check_output(['go', 'version'], text=True).strip(),
               'tests': 'pass',
-              'golden_receipts': 'byte-identical',
+              'golden_receipts': 'matched-local-golden',
           }
-          (dist / 'BUILD-RECEIPT.json').write_text(json.dumps(receipt, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8', newline='\n')
+          (dist / 'BUILD-RECEIPT.json').write_text(
+              json.dumps(receipt, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8', newline='\n'
+          )
+          files = sorted(p for p in dist.rglob('*') if p.is_file() and p.name != 'SHA256SUMS')
+          sums = [f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(dist).as_posix()}" for p in files]
+          (dist / 'SHA256SUMS').write_text('\n'.join(sums) + '\n', encoding='utf-8', newline='\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -111,10 +119,17 @@ jobs:
       - name: Compare canonical receipts across all native runners
         run: |
           python3 - <<'PY'
-          import hashlib, json, pathlib
+          import hashlib, json, os, pathlib
           root = pathlib.Path('artifacts')
           names = ('snapshot-a.json', 'snapshot-b.json', 'comparison.json')
-          receipt = {'schema':'gccmp.convergence-receipt/v0.1','canonical':False,'artifacts':{},'result':'pass'}
+          receipt = {
+              'schema': 'gccmp.convergence-receipt/v0.1',
+              'canonical': False,
+              'source_commit': os.environ['GCCMP_SOURCE_SHA'],
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'artifacts': {},
+              'result': 'pass',
+          }
           for name in names:
               found = sorted(root.glob(f'*/evidence/{name}'))
               if len(found) != 3:
@@ -126,11 +141,14 @@ jobs:
               if blobs[0] != golden.read_bytes():
                   raise SystemExit(f'{name} differs from committed golden file')
               digest = hashlib.sha256(blobs[0]).hexdigest()
-              receipt['artifacts'][name] = {'sha256':digest,'copies':[str(p) for p in found]}
+              receipt['artifacts'][name] = {'sha256': digest, 'copies': [str(p) for p in found]}
               print(f'CONVERGED {name} sha256={digest}')
           out = pathlib.Path('convergence')
           out.mkdir()
-          (out / 'CONVERGENCE-RECEIPT.json').write_text(json.dumps(receipt, sort_keys=True, separators=(',', ':'))+'\n', encoding='utf-8')
+          (out / 'CONVERGENCE-RECEIPT.json').write_text(
+              json.dumps(receipt, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8'
+          )
           PY
       - uses: actions/upload-artifact@v4
         with:
