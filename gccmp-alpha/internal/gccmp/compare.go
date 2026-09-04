@@ -19,7 +19,7 @@ func CompareSnapshots(left, right SnapshotEnvelope) (ComparisonEnvelope, error) 
 		rightByPath[e.Path] = e
 	}
 
-	var relations []Relation
+	relations := make([]Relation, 0)
 	leftOnly := make(map[string]Entry)
 	rightOnly := make(map[string]Entry)
 
@@ -53,15 +53,12 @@ func CompareSnapshots(left, right SnapshotEnvelope) (ComparisonEnvelope, error) 
 			})
 			consumedLeft[lp], consumedRight[rp] = true, true
 		} else if len(leftPaths) > 0 && len(rightPaths) > 0 {
-			for _, lp := range leftPaths {
-				consumedLeft[lp] = true
-			}
-			for _, rp := range rightPaths {
-				consumedRight[rp] = true
-			}
+			// Preserve every unmatched entry below as ADDED/REMOVED. An ambiguous
+			// content match is evidence of a possible rename relationship, not
+			// authority to discard cardinality or choose a pairing.
 			relations = append(relations, Relation{
 				Type: "AMBIGUOUS_RENAME", LeftPath: joinPaths(leftPaths), RightPath: joinPaths(rightPaths),
-				Detail: "multiple unmatched files share the same content hash; rename mapping is not uniquely identifiable",
+				Detail: "multiple unmatched files share the same content hash; no unique rename mapping exists; additions and removals remain explicit",
 			})
 		}
 	}
@@ -96,16 +93,25 @@ func CompareSnapshots(left, right SnapshotEnvelope) (ComparisonEnvelope, error) 
 	})
 
 	countsMap := map[string]int{}
-	overall := "identical"
+	hasChange := false
+	hasConflict := false
 	for _, r := range relations {
 		countsMap[r.Type]++
 		if r.Type != "IDENTICAL" {
-			overall = "changed"
+			hasChange = true
 		}
-		if r.Type == "PORTABILITY_CONFLICT" || r.Type == "AMBIGUOUS_RENAME" || r.Type == "UNSUPPORTED" {
-			overall = "conflicted"
+		switch r.Type {
+		case "PORTABILITY_CONFLICT", "AMBIGUOUS_RENAME", "UNSUPPORTED":
+			hasConflict = true
 		}
 	}
+	overall := "identical"
+	if hasConflict {
+		overall = "conflicted"
+	} else if hasChange {
+		overall = "changed"
+	}
+
 	counts := make([]Count, 0, len(countsMap))
 	for typ, n := range countsMap {
 		counts = append(counts, Count{Type: typ, Count: n})
