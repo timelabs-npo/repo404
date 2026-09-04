@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 )
 
@@ -73,10 +74,17 @@ func ReadSnapshot(path string) (SnapshotEnvelope, error) {
 	if err != nil {
 		return SnapshotEnvelope{}, err
 	}
+	if err := rejectDuplicateJSONKeys(data); err != nil {
+		return SnapshotEnvelope{}, fmt.Errorf("decode snapshot: %w", err)
+	}
+
 	var env SnapshotEnvelope
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&env); err != nil {
+		return SnapshotEnvelope{}, fmt.Errorf("decode snapshot: %w", err)
+	}
+	if err := requireJSONEOF(dec); err != nil {
 		return SnapshotEnvelope{}, fmt.Errorf("decode snapshot: %w", err)
 	}
 	if env.Schema != SnapshotEnvelopeSchema {
@@ -98,4 +106,84 @@ func ReadSnapshot(path string) (SnapshotEnvelope, error) {
 func VerifySnapshot(path string) error {
 	_, err := ReadSnapshot(path)
 	return err
+}
+
+// rejectDuplicateJSONKeys performs a syntax walk before typed decoding. Go's
+// normal object decoder accepts duplicate member names with last-value-wins
+// behavior; canonical evidence cannot permit that ambiguity.
+func rejectDuplicateJSONKeys(data []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	if err := walkJSONValue(dec); err != nil {
+		return err
+	}
+	return requireJSONEOF(dec)
+}
+
+func walkJSONValue(dec *json.Decoder) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+
+	switch delim {
+	case '{':
+		seen := make(map[string]struct{})
+		for dec.More() {
+			keyToken, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, ok := keyToken.(string)
+			if !ok {
+				return fmt.Errorf("object member name is not a string")
+			}
+			if _, exists := seen[key]; exists {
+				return fmt.Errorf("duplicate JSON object key %q", key)
+			}
+			seen[key] = struct{}{}
+			if err := walkJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		end, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim('}') {
+			return fmt.Errorf("malformed JSON object")
+		}
+	case '[':
+		for dec.More() {
+			if err := walkJSONValue(dec); err != nil {
+				return err
+			}
+		}
+		end, err := dec.Token()
+		if err != nil {
+			return err
+		}
+		if end != json.Delim(']') {
+			return fmt.Errorf("malformed JSON array")
+		}
+	default:
+		return fmt.Errorf("unexpected JSON delimiter %q", delim)
+	}
+	return nil
+}
+
+func requireJSONEOF(dec *json.Decoder) error {
+	var trailing any
+	err := dec.Decode(&trailing)
+	if err == io.EOF {
+		return nil
+	}
+	if err == nil {
+		return fmt.Errorf("trailing JSON value after snapshot envelope")
+	}
+	return fmt.Errorf("trailing non-whitespace data after snapshot envelope: %w", err)
 }
