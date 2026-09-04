@@ -2,6 +2,8 @@ package gccmp
 
 import (
 	"fmt"
+	"reflect"
+	"sort"
 	"strings"
 )
 
@@ -62,6 +64,37 @@ func validateSnapshotPayload(payload SnapshotPayload) error {
 				return fmt.Errorf("portability issues are not canonically ordered")
 			}
 		}
+	}
+
+	expectedIssues := make([]PortabilityIssue, 0)
+	for _, entry := range payload.Entries {
+		_, issues := portableName(entry.Path)
+		expectedIssues = append(expectedIssues, issues...)
+		switch entry.Kind {
+		case "symlink":
+			expectedIssues = append(expectedIssues, PortabilityIssue{
+				Code:   "unsupported_symlink",
+				Path:   entry.Path,
+				Detail: "symlink recorded but not followed; snapshots containing it cannot claim portable namespace equivalence",
+			})
+		case "other":
+			expectedIssues = append(expectedIssues, PortabilityIssue{
+				Code: "unsupported_file_kind", Path: entry.Path, Detail: entry.UnsupportedNote,
+			})
+		}
+	}
+	sort.Slice(expectedIssues, func(i, j int) bool {
+		if expectedIssues[i].Path != expectedIssues[j].Path {
+			return expectedIssues[i].Path < expectedIssues[j].Path
+		}
+		return expectedIssues[i].Code < expectedIssues[j].Code
+	})
+	if !reflect.DeepEqual(payload.PortabilityIssues, expectedIssues) {
+		return fmt.Errorf("portability issues do not match deterministic derivation from entries")
+	}
+	expectedConflicts := findPortabilityConflicts(payload.Entries)
+	if !reflect.DeepEqual(payload.PortabilityConflicts, expectedConflicts) {
+		return fmt.Errorf("portability conflicts do not match deterministic derivation from entries")
 	}
 
 	previousKey := ""
