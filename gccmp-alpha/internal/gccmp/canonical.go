@@ -26,6 +26,9 @@ func digestBytes(data []byte) string {
 }
 
 func NewSnapshotEnvelope(payload SnapshotPayload) (SnapshotEnvelope, error) {
+	if err := validateSnapshotPayload(payload); err != nil {
+		return SnapshotEnvelope{}, err
+	}
 	data, err := canonicalJSON(payload)
 	if err != nil {
 		return SnapshotEnvelope{}, err
@@ -87,18 +90,15 @@ func ReadSnapshot(path string) (SnapshotEnvelope, error) {
 	if err := requireJSONEOF(dec); err != nil {
 		return SnapshotEnvelope{}, fmt.Errorf("decode snapshot: %w", err)
 	}
-	if env.Schema != SnapshotEnvelopeSchema {
-		return SnapshotEnvelope{}, fmt.Errorf("unsupported snapshot envelope schema %q", env.Schema)
+	if err := validateSnapshotEnvelope(env); err != nil {
+		return SnapshotEnvelope{}, err
 	}
-	if env.Payload.Schema != SnapshotSchema {
-		return SnapshotEnvelope{}, fmt.Errorf("unsupported snapshot payload schema %q", env.Payload.Schema)
-	}
-	payload, err := canonicalJSON(env.Payload)
+	canonical, err := canonicalJSON(env)
 	if err != nil {
 		return SnapshotEnvelope{}, err
 	}
-	if got := digestBytes(payload); got != env.PayloadSHA256 {
-		return SnapshotEnvelope{}, fmt.Errorf("snapshot payload digest mismatch: got %s want %s", got, env.PayloadSHA256)
+	if !bytes.Equal(data, canonical) {
+		return SnapshotEnvelope{}, fmt.Errorf("snapshot envelope is valid JSON but not canonical byte encoding")
 	}
 	return env, nil
 }
