@@ -80,18 +80,16 @@ func TestAmbiguousRename(t *testing.T) {
 }
 
 func TestASCIIPathCollision(t *testing.T) {
-	dir := t.TempDir()
-	mustWrite(t, filepath.Join(dir, "Foo.txt"), []byte("a"))
-	mustWrite(t, filepath.Join(dir, "foo.txt"), []byte("b"))
-	env, err := SnapshotDirectory(dir, "case", "")
-	if err != nil {
-		t.Fatal(err)
+	entries := []Entry{
+		{Path: "Foo.txt", PortableKey: "foo.txt"},
+		{Path: "foo.txt", PortableKey: "foo.txt"},
 	}
-	if runtime.GOOS == "windows" {
-		return
+	conflicts := findPortabilityConflicts(entries)
+	if len(conflicts) != 1 {
+		t.Fatalf("conflicts=%v", conflicts)
 	}
-	if len(env.Payload.PortabilityConflicts) != 1 {
-		t.Fatalf("conflicts=%v", env.Payload.PortabilityConflicts)
+	if conflicts[0].PortableKey != "foo.txt" || len(conflicts[0].Paths) != 2 {
+		t.Fatalf("unexpected conflict=%v", conflicts[0])
 	}
 }
 
