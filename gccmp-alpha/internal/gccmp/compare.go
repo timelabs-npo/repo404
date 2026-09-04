@@ -6,8 +6,11 @@ import (
 )
 
 func CompareSnapshots(left, right SnapshotEnvelope) (ComparisonEnvelope, error) {
-	if left.Payload.Schema != SnapshotSchema || right.Payload.Schema != SnapshotSchema {
-		return ComparisonEnvelope{}, fmt.Errorf("unsupported snapshot schema")
+	if err := validateSnapshotEnvelope(left); err != nil {
+		return ComparisonEnvelope{}, fmt.Errorf("invalid left snapshot: %w", err)
+	}
+	if err := validateSnapshotEnvelope(right); err != nil {
+		return ComparisonEnvelope{}, fmt.Errorf("invalid right snapshot: %w", err)
 	}
 
 	leftByPath := make(map[string]Entry, len(left.Payload.Entries))
