@@ -1,6 +1,7 @@
 package gccmp
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -184,6 +185,70 @@ func TestTrailingJSONRejected(t *testing.T) {
 	}
 	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
 		t.Fatalf("trailing JSON was not rejected explicitly: %v", err)
+	}
+}
+
+func TestDuplicatePathRejectedEvenWithMatchingDigest(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.txt"), []byte("x"))
+	valid, _ := SnapshotDirectory(dir, "duplicate-path", "")
+	payload := valid.Payload
+	payload.Entries = append(payload.Entries, payload.Entries[0])
+	payloadBytes, _ := canonicalJSON(payload)
+	forged := SnapshotEnvelope{
+		Schema:        SnapshotEnvelopeSchema,
+		PayloadSHA256: digestBytes(payloadBytes),
+		Payload:       payload,
+	}
+	path := filepath.Join(t.TempDir(), "duplicate-path.json")
+	if err := WriteCanonical(path, forged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "duplicate path") {
+		t.Fatalf("duplicate path was not rejected: %v", err)
+	}
+	if _, err := CompareSnapshots(forged, valid); err == nil || !strings.Contains(err.Error(), "invalid left snapshot") {
+		t.Fatalf("in-memory invalid snapshot reached comparator: %v", err)
+	}
+}
+
+func TestNonCanonicalEnvelopeRejected(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.txt"), []byte("x"))
+	env, _ := SnapshotDirectory(dir, "pretty", "")
+	canonical, _ := canonicalJSON(env)
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, canonical, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	pretty.WriteByte('\n')
+	path := filepath.Join(t.TempDir(), "pretty.json")
+	if err := os.WriteFile(path, pretty.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "not canonical") {
+		t.Fatalf("noncanonical envelope was not rejected: %v", err)
+	}
+}
+
+func TestInvalidChunkCoverageRejected(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.txt"), []byte("abcdef"))
+	valid, _ := SnapshotDirectory(dir, "bad-chunk", "")
+	payload := valid.Payload
+	payload.Entries[0].Chunks[0].Length--
+	payloadBytes, _ := canonicalJSON(payload)
+	forged := SnapshotEnvelope{
+		Schema:        SnapshotEnvelopeSchema,
+		PayloadSHA256: digestBytes(payloadBytes),
+		Payload:       payload,
+	}
+	path := filepath.Join(t.TempDir(), "bad-chunk.json")
+	if err := WriteCanonical(path, forged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "chunk coverage") {
+		t.Fatalf("invalid chunk coverage was not rejected: %v", err)
 	}
 }
 
