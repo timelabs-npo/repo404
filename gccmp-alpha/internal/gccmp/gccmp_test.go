@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -63,16 +62,20 @@ func TestCompareAddModifyRename(t *testing.T) {
 	}
 }
 
-func TestAmbiguousRename(t *testing.T) {
+func TestAmbiguousRenamePreservesCardinality(t *testing.T) {
 	leftDir, rightDir := t.TempDir(), t.TempDir()
 	mustWrite(t, filepath.Join(leftDir, "a.txt"), []byte("same"))
 	mustWrite(t, filepath.Join(leftDir, "b.txt"), []byte("same"))
 	mustWrite(t, filepath.Join(rightDir, "c.txt"), []byte("same"))
+	mustWrite(t, filepath.Join(rightDir, "other.txt"), []byte("different"))
 	left, _ := SnapshotDirectory(leftDir, "left", "")
 	right, _ := SnapshotDirectory(rightDir, "right", "")
 	cmp, _ := CompareSnapshots(left, right)
 	if !hasRelation(cmp, "AMBIGUOUS_RENAME") {
 		t.Fatal("expected ambiguous rename")
+	}
+	if relationCount(cmp, "REMOVED") != 2 || relationCount(cmp, "ADDED") != 2 {
+		t.Fatalf("ambiguous mapping discarded cardinality: relations=%v", cmp.Payload.Relations)
 	}
 	if cmp.Payload.Overall != "conflicted" {
 		t.Fatalf("overall=%s", cmp.Payload.Overall)
@@ -93,19 +96,18 @@ func TestASCIIPathCollision(t *testing.T) {
 	}
 }
 
-func TestWindowsReservedName(t *testing.T) {
-	dir := t.TempDir()
-	name := "CON.txt"
-	if runtime.GOOS == "windows" {
-		name = "safe.txt"
-	}
-	mustWrite(t, filepath.Join(dir, name), []byte("x"))
-	env, err := SnapshotDirectory(dir, "reserved", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runtime.GOOS != "windows" && !hasIssue(env.Payload.PortabilityIssues, "windows_reserved_name") {
+func TestWindowsReservedNameProfileIsHostIndependent(t *testing.T) {
+	_, issues := portableName("CON.txt")
+	if !hasIssue(issues, "windows_reserved_name") {
 		t.Fatal("expected Windows reserved-name issue")
+	}
+	_, issues = portableName("dir/trailing.")
+	if !hasIssue(issues, "windows_trailing_dot_or_space") {
+		t.Fatal("expected Windows trailing-dot issue")
+	}
+	_, issues = portableName("bad*name.txt")
+	if !hasIssue(issues, "windows_invalid_character") {
+		t.Fatal("expected Windows invalid-character issue")
 	}
 }
 
@@ -147,6 +149,41 @@ func TestUnknownFieldRejected(t *testing.T) {
 	}
 	if _, err := ReadSnapshot(path); err == nil {
 		t.Fatal("unknown field accepted")
+	}
+}
+
+func TestDuplicateJSONKeyRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "duplicate.json")
+	data := `{"schema":"gccmp.snapshot-envelope/v0.1","schema":"gccmp.snapshot-envelope/v0.1","payload_sha256":"sha256:0","payload":{"schema":"gccmp.snapshot/v0.1","label":"x","chunk_size":1048576,"entries":[],"portability_issues":[],"portability_conflicts":[],"causality":"x"}}`
+	if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "duplicate JSON object key") {
+		t.Fatalf("duplicate key was not rejected explicitly: %v", err)
+	}
+}
+
+func TestTrailingJSONRejected(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.txt"), []byte("x"))
+	env, _ := SnapshotDirectory(dir, "trailing", "")
+	path := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := WriteCanonical(path, env); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"second":true}`); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "trailing JSON value") {
+		t.Fatalf("trailing JSON was not rejected explicitly: %v", err)
 	}
 }
 
@@ -196,12 +233,17 @@ func mustWrite(t *testing.T, path string, data []byte) {
 }
 
 func hasRelation(c ComparisonEnvelope, typ string) bool {
+	return relationCount(c, typ) > 0
+}
+
+func relationCount(c ComparisonEnvelope, typ string) int {
+	n := 0
 	for _, r := range c.Payload.Relations {
 		if r.Type == typ {
-			return true
+			n++
 		}
 	}
-	return false
+	return n
 }
 
 func hasIssue(issues []PortabilityIssue, code string) bool {
