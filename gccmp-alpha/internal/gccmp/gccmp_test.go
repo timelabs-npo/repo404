@@ -252,6 +252,29 @@ func TestInvalidChunkCoverageRejected(t *testing.T) {
 	}
 }
 
+func TestForgedPortabilityConflictRejected(t *testing.T) {
+	dir := t.TempDir()
+	mustWrite(t, filepath.Join(dir, "a.txt"), []byte("x"))
+	valid, _ := SnapshotDirectory(dir, "forged-portability", "")
+	payload := valid.Payload
+	payload.PortabilityConflicts = []PortabilityConflict{{
+		PortableKey: "fake", Paths: []string{"a.txt", "ghost.txt"},
+	}}
+	payloadBytes, _ := canonicalJSON(payload)
+	forged := SnapshotEnvelope{
+		Schema:        SnapshotEnvelopeSchema,
+		PayloadSHA256: digestBytes(payloadBytes),
+		Payload:       payload,
+	}
+	path := filepath.Join(t.TempDir(), "forged-portability.json")
+	if err := WriteCanonical(path, forged); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadSnapshot(path); err == nil || !strings.Contains(err.Error(), "deterministic derivation") {
+		t.Fatalf("forged portability conflict was not rejected: %v", err)
+	}
+}
+
 func TestChunking(t *testing.T) {
 	dir := t.TempDir()
 	data := make([]byte, DefaultChunkSize+17)
