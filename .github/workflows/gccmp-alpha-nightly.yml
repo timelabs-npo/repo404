@@ -8,6 +8,9 @@ on:
 permissions:
   contents: read
 
+env:
+  GCCMP_SOURCE_SHA: ${{ github.sha }}
+
 concurrency:
   group: gccmp-alpha-nightly
   cancel-in-progress: false
@@ -20,18 +23,12 @@ jobs:
         include:
           - id: windows-x64
             os: windows-2025
-            goos: windows
-            goarch: amd64
             binary: gccmp.exe
           - id: macos-arm64
             os: macos-26
-            goos: darwin
-            goarch: arm64
             binary: gccmp
           - id: macos-x64
             os: macos-26-intel
-            goos: darwin
-            goarch: amd64
             binary: gccmp
     runs-on: ${{ matrix.os }}
     defaults:
@@ -43,6 +40,12 @@ jobs:
         with:
           go-version: '1.27.1'
           cache-dependency-path: gccmp-alpha/go.mod
+      - name: Toolchain receipt
+        shell: bash
+        run: |
+          go version
+          go env GOOS GOARCH
+          printf 'source_commit=%s\nworkflow_commit=%s\n' "$GCCMP_SOURCE_SHA" "$GITHUB_SHA"
       - name: Test
         shell: bash
         run: go test -count=1 ./...
@@ -50,13 +53,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist/evidence out
-          go build -trimpath -ldflags "-s -w -X main.version=${GITHUB_SHA}" -o "dist/${{ matrix.binary }}" ./cmd/gccmp
+          go build -trimpath -ldflags "-s -w -X main.version=${GCCMP_SOURCE_SHA}" -o "dist/${{ matrix.binary }}" ./cmd/gccmp
           "dist/${{ matrix.binary }}" snapshot --label fixture-a --out dist/evidence/snapshot-a.json testdata/fixture-a
           "dist/${{ matrix.binary }}" snapshot --label fixture-b --out dist/evidence/snapshot-b.json testdata/fixture-b
           "dist/${{ matrix.binary }}" compare --out dist/evidence/comparison.json dist/evidence/snapshot-a.json dist/evidence/snapshot-b.json
+          "dist/${{ matrix.binary }}" verify dist/evidence/snapshot-a.json
           cp dist/evidence/*.json out/
           python3 scripts/check_golden.py
-      - name: Emit nightly receipt
+      - name: Emit nightly receipt and hashes
         shell: bash
         env:
           TARGET_ID: ${{ matrix.id }}
@@ -65,17 +69,31 @@ jobs:
           python3 - <<'PY'
           import hashlib, json, os, pathlib, subprocess
           dist = pathlib.Path('dist')
-          tracked = sorted(p for p in dist.rglob('*') if p.is_file())
-          (dist/'SHA256SUMS').write_text(''.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(dist).as_posix()}\n" for p in tracked), encoding='utf-8')
           receipt = {
-            'schema':'gccmp.nightly-receipt/v0.1','canonical':False,
-            'target_id':os.environ['TARGET_ID'],'binary':os.environ['BINARY_NAME'],
-            'commit':os.environ['GITHUB_SHA'],'run_id':os.environ['GITHUB_RUN_ID'],
-            'runner_os':os.environ['RUNNER_OS'],'runner_arch':os.environ['RUNNER_ARCH'],
-            'go_version':subprocess.check_output(['go','version'], text=True).strip(),
-            'result':'pass'
+              'schema': 'gccmp.nightly-receipt/v0.1',
+              'canonical': False,
+              'target_id': os.environ['TARGET_ID'],
+              'binary': os.environ['BINARY_NAME'],
+              'source_commit': os.environ['GCCMP_SOURCE_SHA'],
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'source_ref': os.environ.get('GITHUB_REF_NAME'),
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'runner_os': os.environ['RUNNER_OS'],
+              'runner_arch': os.environ['RUNNER_ARCH'],
+              'go_version': subprocess.check_output(['go', 'version'], text=True).strip(),
+              'tests': 'pass',
+              'golden_receipts': 'matched-local-golden',
+              'result': 'pass',
           }
-          (dist/'NIGHTLY-RECEIPT.json').write_text(json.dumps(receipt, sort_keys=True, separators=(',', ':'))+'\n', encoding='utf-8')
+          (dist / 'NIGHTLY-RECEIPT.json').write_text(
+              json.dumps(receipt, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8', newline='\n'
+          )
+          tracked = sorted(p for p in dist.rglob('*') if p.is_file() and p.name != 'SHA256SUMS')
+          (dist / 'SHA256SUMS').write_text(
+              ''.join(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(dist).as_posix()}\n" for p in tracked),
+              encoding='utf-8', newline='\n'
+          )
           PY
       - uses: actions/upload-artifact@v4
         with:
@@ -97,10 +115,17 @@ jobs:
       - name: Verify all nightly canonical receipts converge
         run: |
           python3 - <<'PY'
-          import hashlib, json, pathlib
+          import hashlib, json, os, pathlib
           root = pathlib.Path('artifacts')
-          names = ('snapshot-a.json','snapshot-b.json','comparison.json')
-          result = {'schema':'gccmp.nightly-convergence/v0.1','canonical':False,'result':'pass','receipts':{}}
+          names = ('snapshot-a.json', 'snapshot-b.json', 'comparison.json')
+          result = {
+              'schema': 'gccmp.nightly-convergence/v0.1',
+              'canonical': False,
+              'source_commit': os.environ['GCCMP_SOURCE_SHA'],
+              'workflow_commit': os.environ['GITHUB_SHA'],
+              'result': 'pass',
+              'receipts': {},
+          }
           for name in names:
               found = sorted(root.glob(f'*/evidence/{name}'))
               if len(found) != 3:
@@ -112,11 +137,14 @@ jobs:
               if blobs[0] != golden.read_bytes():
                   raise SystemExit(f'nightly output differs from golden: {name}')
               digest = hashlib.sha256(blobs[0]).hexdigest()
-              result['receipts'][name] = {'sha256':digest,'copies':[str(p) for p in found]}
+              result['receipts'][name] = {'sha256': digest, 'copies': [str(p) for p in found]}
               print(f'NIGHTLY CONVERGED {name} sha256={digest}')
           out = pathlib.Path('convergence')
           out.mkdir()
-          (out/'NIGHTLY-CONVERGENCE.json').write_text(json.dumps(result,sort_keys=True,separators=(',',':'))+'\n',encoding='utf-8')
+          (out / 'NIGHTLY-CONVERGENCE.json').write_text(
+              json.dumps(result, sort_keys=True, separators=(',', ':')) + '\n',
+              encoding='utf-8'
+          )
           PY
       - uses: actions/upload-artifact@v4
         with:
